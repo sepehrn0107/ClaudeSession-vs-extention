@@ -1,0 +1,62 @@
+{
+  "name": "claude-sessions",
+  "displayName": "Claude Sessions",
+  "description": "Browse your local Claude Code session history",
+  "version": "0.1.0",
+  "publisher": "sepehrn",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "claude-sessions",
+          "title": "Claude Sessions",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "claude-sessions": [
+        {
+          "id": "claudeSessionsTree",
+          "name": "Sessions"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "claudeSessions.refresh",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "claudeSessions.openSession",
+        "title": "Open Session"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "claudeSessions.refresh",
+          "when": "view == claudeSessionsTree",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  }
+}

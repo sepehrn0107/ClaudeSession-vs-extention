@@ -2,12 +2,14 @@
   "name": "claude-sessions",
   "displayName": "Claude Sessions",
   "description": "Browse your local Claude Code session history",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "sepehrn",
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Other"],
+  "categories": [
+    "Other"
+  ],
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
@@ -47,16 +49,33 @@
           "group": "navigation"
         }
       ]
+    },
+    "configuration": {
+      "title": "Claude Sessions",
+      "properties": {
+        "claudeSessions.workspaceRoot": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the directory whose subdirectories are treated as projects (e.g. /home/user/workspace or C:\\Users\\you\\workspace)."
+        },
+        "claudeSessions.activeProjectFile": {
+          "type": "string",
+          "default": "",
+          "description": "Optional. Path to a file containing 'active: <name>' \u00e2\u20ac\u201d that project group will be expanded by default."
+        }
+      }
     }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "test": "vitest run"
   },
   "devDependencies": {
-    "@types/vscode": "^1.85.0",
     "@types/node": "^20.0.0",
-    "typescript": "^5.3.0"
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0",
+    "vitest": "^2.1.9"
   }
 }

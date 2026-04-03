@@ -15,6 +15,15 @@ export interface Session {
   filePath: string;
   startedAt: string;
   firstUserMessage: string;
+  cwd?: string;
+  hintPath?: string;
+}
+
+export interface ParsedSession {
+  startedAt: string;
+  firstUserMessage: string;
+  cwd?: string;
+  hintPath?: string;
 }
 
 const CLAUDE_DIR = path.join(os.homedir(), ".claude", "projects");
@@ -28,7 +37,50 @@ export function listProjects(): string[] {
 }
 
 export function slugToPath(slug: string): string {
-  return slug.replace(/^[a-z]--/, (m) => m[0].toUpperCase() + ":\\").replace(/--/g, "\\");
+  if (/^[a-z]-/i.test(slug)) {
+    // Windows: 'c--Users-sepeh-Documents-workspace' → 'C:\Users\sepeh\Documents\workspace'
+    // Replace '--' before '-' to avoid double backslash from the initial '--'
+    return slug[0].toUpperCase() + ":" + slug.slice(1).replace(/--/g, "\\").replace(/-/g, "\\");
+  }
+  // Linux/Mac: '-home-user-workspace' → '/home/user/workspace'
+  return slug.replace(/-/g, "/");
+}
+
+const IDE_FILE_RE = /The user opened the file ([^\n<]+) in the IDE/i;
+
+export function parseSessionLines(lines: string[]): ParsedSession {
+  let startedAt = "";
+  let firstUserMessage = "(empty)";
+  let cwd: string | undefined;
+  let hintPath: string | undefined;
+
+  for (const line of lines) {
+    try {
+      const obj = JSON.parse(line);
+      if (!startedAt && obj.timestamp) {
+        startedAt = obj.timestamp;
+      }
+      if (!cwd && obj.cwd) {
+        cwd = obj.cwd;
+      }
+      if (obj.type === "user" && obj.message?.content) {
+        const text = extractText(obj.message.content);
+        if (firstUserMessage === "(empty)" && text.trim()) {
+          firstUserMessage = text.slice(0, 80).trim();
+        }
+        if (!hintPath) {
+          const m = text.match(IDE_FILE_RE);
+          if (m) {
+            hintPath = m[1].trim();
+          }
+        }
+      }
+    } catch {
+      // skip malformed lines
+    }
+  }
+
+  return { startedAt, firstUserMessage, cwd, hintPath };
 }
 
 export function listSessions(projectSlug: string): Session[] {
@@ -44,28 +96,7 @@ export function listSessions(projectSlug: string): Session[] {
   for (const file of files) {
     const filePath = path.join(dir, file);
     const id = file.replace(".jsonl", "");
-    const lines = readLines(filePath, 20);
-
-    let startedAt = "";
-    let firstUserMessage = "(empty)";
-
-    for (const line of lines) {
-      try {
-        const obj = JSON.parse(line);
-        if (!startedAt && obj.timestamp) {
-          startedAt = obj.timestamp;
-        }
-        if (
-          obj.type === "user" &&
-          obj.message?.content?.[0]?.text &&
-          firstUserMessage === "(empty)"
-        ) {
-          firstUserMessage = obj.message.content[0].text.slice(0, 80).trim();
-        }
-      } catch {
-        // skip malformed lines
-      }
-    }
+    const { startedAt, firstUserMessage, cwd, hintPath } = parseSessionLines(readLines(filePath, 20));
 
     sessions.push({
       id,
@@ -74,6 +105,8 @@ export function listSessions(projectSlug: string): Session[] {
       filePath,
       startedAt,
       firstUserMessage,
+      cwd,
+      hintPath,
     });
   }
 
@@ -96,11 +129,7 @@ export function readSession(filePath: string): ChatMessage[] {
       } else if (obj.type === "assistant" && obj.message?.content) {
         const text = extractText(obj.message.content);
         if (text) {
-          messages.push({
-            role: "assistant",
-            text,
-            timestamp: obj.timestamp ?? "",
-          });
+          messages.push({ role: "assistant", text, timestamp: obj.timestamp ?? "" });
         }
       }
     } catch {
@@ -109,6 +138,66 @@ export function readSession(filePath: string): ChatMessage[] {
   }
 
   return messages;
+}
+
+export function listAllSessions(): Session[] {
+  return listProjects().flatMap((slug) => listSessions(slug));
+}
+
+export function groupSessions(
+  sessions: Session[],
+  workspaceRoot: string,
+  projectNames: string[]
+): Map<string, Session[]> {
+  const map = new Map<string, Session[]>();
+  for (const name of [...projectNames, "other"]) {
+    map.set(name, []);
+  }
+
+  const isWindows = process.platform === "win32";
+  const normalize = (p: string) => {
+    const n = path.normalize(p);
+    return isWindows ? n.toLowerCase() : n;
+  };
+
+  for (const session of sessions) {
+    const pathsToTry = [session.cwd, session.hintPath].filter(Boolean) as string[];
+
+    if (pathsToTry.length === 0) {
+      map.get("other")!.push(session);
+      continue;
+    }
+
+    let matched = false;
+
+    outer: for (const candidate of pathsToTry) {
+      const normalized = normalize(candidate);
+      for (const name of projectNames) {
+        const root = normalize(path.join(workspaceRoot, name));
+        if (normalized === root || normalized.startsWith(root + path.sep)) {
+          map.get(name)!.push(session);
+          matched = true;
+          break outer;
+        }
+      }
+    }
+
+    if (!matched) {
+      map.get("other")!.push(session);
+    }
+  }
+
+  return map;
+}
+
+export function readActiveProject(filePath: string): string | null {
+  try {
+    const content = fs.readFileSync(filePath, "utf8");
+    const match = content.match(/^active:\s*(.+)$/m);
+    return match?.[1].trim() ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function readLines(filePath: string, maxLines: number): string[] {

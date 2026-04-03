@@ -26,6 +26,13 @@ export interface ParsedSession {
   hintPath?: string;
 }
 
+export interface ContextUsage {
+  used: number;
+  limit: number;
+  pct: number;
+  model: string;
+}
+
 const CLAUDE_DIR = path.join(os.homedir(), ".claude", "projects");
 
 export function listProjects(): string[] {
@@ -218,6 +225,29 @@ export function loadSessionPidMap(): Map<string, number> {
     }
   }
   return map;
+}
+
+export function getContextUsage(filePath: string): ContextUsage | null {
+  const lines = fs.readFileSync(filePath, "utf8").split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    try {
+      const obj = JSON.parse(line);
+      if (obj.type === "assistant" && obj.message?.usage) {
+        const u = obj.message.usage;
+        const used =
+          (u.input_tokens ?? 0) +
+          (u.cache_creation_input_tokens ?? 0) +
+          (u.cache_read_input_tokens ?? 0);
+        const limit = 200_000;
+        return { used, limit, pct: Math.round((used / limit) * 100), model: obj.message.model ?? "" };
+      }
+    } catch {
+      // skip malformed
+    }
+  }
+  return null;
 }
 
 function readLines(filePath: string, maxLines: number): string[] {

@@ -200,6 +200,23 @@ export function readActiveProject(filePath: string): string | null {
   }
 }
 
+export function loadSessionPidMap(): Map<string, number> {
+  const sessionsDir = path.join(os.homedir(), ".claude", "sessions");
+  const map = new Map<string, number>();
+  if (!fs.existsSync(sessionsDir)) return map;
+  for (const file of fs.readdirSync(sessionsDir).filter((f) => f.endsWith(".json"))) {
+    const pid = parseInt(file.replace(".json", ""), 10);
+    if (isNaN(pid)) continue;
+    try {
+      const meta = JSON.parse(fs.readFileSync(path.join(sessionsDir, file), "utf8"));
+      if (meta.sessionId) map.set(meta.sessionId, pid);
+    } catch {
+      // skip malformed
+    }
+  }
+  return map;
+}
+
 function readLines(filePath: string, maxLines: number): string[] {
   const content = fs.readFileSync(filePath, "utf8");
   return content.split("\n").slice(0, maxLines);

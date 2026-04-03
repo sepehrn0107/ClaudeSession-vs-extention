@@ -39,6 +39,10 @@
       {
         "command": "claudeSessions.openSession",
         "title": "Open Session"
+      },
+      {
+        "command": "claudeSessions.focusSession",
+        "title": "Focus Session"
       }
     ],
     "menus": {

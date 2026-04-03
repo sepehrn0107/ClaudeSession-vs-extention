@@ -1,11 +1,42 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import {
   listAllSessions,
   groupSessions,
   readActiveProject,
+  loadSessionPidMap,
   Session,
 } from "./SessionReader";
+
+interface StatusSnapshot {
+  pendingInput?: boolean;
+  [key: string]: unknown;
+}
+
+function loadStatusMap(): Map<string, StatusSnapshot> {
+  const statusDir = path.join(os.homedir(), ".claude", "sessions-status");
+  const pidMap = loadSessionPidMap(); // Map<sessionId, pid>
+  const pidToSid = new Map<number, string>();
+  for (const [sid, pid] of pidMap) pidToSid.set(pid, sid);
+
+  const result = new Map<string, StatusSnapshot>();
+  if (!fs.existsSync(statusDir)) return result;
+  for (const file of fs.readdirSync(statusDir).filter((f) => f.endsWith(".json"))) {
+    const pid = parseInt(file.replace(".json", ""), 10);
+    if (isNaN(pid)) continue;
+    const sid = pidToSid.get(pid);
+    if (!sid) continue;
+    try {
+      const snap = JSON.parse(fs.readFileSync(path.join(statusDir, file), "utf8"));
+      result.set(sid, snap);
+    } catch {
+      // skip malformed
+    }
+  }
+  return result;
+}
 
 export type TreeNode = WorkspaceGroupNode | SessionNode | MessageNode;
 
@@ -34,19 +65,20 @@ export class WorkspaceGroupNode extends vscode.TreeItem {
 }
 
 export class SessionNode extends vscode.TreeItem {
-  constructor(public readonly session: Session) {
+  constructor(public readonly session: Session, snapshot?: StatusSnapshot) {
     const date = session.startedAt
       ? new Date(session.startedAt).toLocaleString()
       : "Unknown date";
+    const pending = snapshot?.pendingInput === true;
 
     super(session.firstUserMessage || date, vscode.TreeItemCollapsibleState.None);
-    this.description = date;
-    this.contextValue = "session";
-    this.iconPath = new vscode.ThemeIcon("comment-discussion");
+    this.description = pending ? `${date} \u00b7 Waiting` : date;
+    this.contextValue = pending ? "session-pending" : "session";
+    this.iconPath = new vscode.ThemeIcon(pending ? "bell-dot" : "comment-discussion");
     this.tooltip = `${date}\n${session.id}`;
     this.command = {
-      command: "claudeSessions.openSession",
-      title: "Open Session",
+      command: pending ? "claudeSessions.focusSession" : "claudeSessions.openSession",
+      title: pending ? "Focus Session" : "Open Session",
       arguments: [session],
     };
   }
@@ -58,8 +90,15 @@ export class SessionsProvider implements vscode.TreeDataProvider<TreeNode> {
 
   private _groups: WorkspaceGroupNode[] | null = null;
   private _sessionCache: Map<string, SessionNode[]> | null = null;
+  private _statusMap: Map<string, StatusSnapshot> | null = null;
+  pendingCount = 0;
 
   refresh(): void {
+    this._statusMap = loadStatusMap();
+    this.pendingCount = 0;
+    for (const [, snap] of this._statusMap) {
+      if (snap.pendingInput) this.pendingCount++;
+    }
     this._groups = null;
     this._sessionCache = null;
     this._onDidChangeTreeData.fire(undefined);
@@ -116,10 +155,11 @@ export class SessionsProvider implements vscode.TreeDataProvider<TreeNode> {
       groups.push(new WorkspaceGroupNode("other", other.length, false));
     }
 
+    const statusMap = this._statusMap ?? new Map<string, StatusSnapshot>();
     this._sessionCache = new Map<string, SessionNode[]>();
     for (const name of [...projectNames, "other"]) {
       const sessionList = grouped.get(name) ?? [];
-      this._sessionCache.set(name, sessionList.map((s) => new SessionNode(s)));
+      this._sessionCache.set(name, sessionList.map((s) => new SessionNode(s, statusMap.get(s.id))));
     }
 
     this._groups = groups;

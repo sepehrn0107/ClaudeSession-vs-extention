@@ -16,12 +16,14 @@ export interface Session {
   startedAt: string;
   firstUserMessage: string;
   cwd?: string;
+  hintPath?: string;
 }
 
 export interface ParsedSession {
   startedAt: string;
   firstUserMessage: string;
   cwd?: string;
+  hintPath?: string;
 }
 
 const CLAUDE_DIR = path.join(os.homedir(), ".claude", "projects");
@@ -44,10 +46,13 @@ export function slugToPath(slug: string): string {
   return slug.replace(/-/g, "/");
 }
 
+const IDE_FILE_RE = /The user opened the file ([^\n<]+) in the IDE/i;
+
 export function parseSessionLines(lines: string[]): ParsedSession {
   let startedAt = "";
   let firstUserMessage = "(empty)";
   let cwd: string | undefined;
+  let hintPath: string | undefined;
 
   for (const line of lines) {
     try {
@@ -58,19 +63,24 @@ export function parseSessionLines(lines: string[]): ParsedSession {
       if (!cwd && obj.cwd) {
         cwd = obj.cwd;
       }
-      if (
-        obj.type === "user" &&
-        obj.message?.content?.[0]?.text &&
-        firstUserMessage === "(empty)"
-      ) {
-        firstUserMessage = obj.message.content[0].text.slice(0, 80).trim();
+      if (obj.type === "user" && obj.message?.content) {
+        const text = extractText(obj.message.content);
+        if (firstUserMessage === "(empty)" && text.trim()) {
+          firstUserMessage = text.slice(0, 80).trim();
+        }
+        if (!hintPath) {
+          const m = text.match(IDE_FILE_RE);
+          if (m) {
+            hintPath = m[1].trim();
+          }
+        }
       }
     } catch {
       // skip malformed lines
     }
   }
 
-  return { startedAt, firstUserMessage, cwd };
+  return { startedAt, firstUserMessage, cwd, hintPath };
 }
 
 export function listSessions(projectSlug: string): Session[] {
@@ -86,7 +96,7 @@ export function listSessions(projectSlug: string): Session[] {
   for (const file of files) {
     const filePath = path.join(dir, file);
     const id = file.replace(".jsonl", "");
-    const { startedAt, firstUserMessage, cwd } = parseSessionLines(readLines(filePath, 20));
+    const { startedAt, firstUserMessage, cwd, hintPath } = parseSessionLines(readLines(filePath, 20));
 
     sessions.push({
       id,
@@ -96,6 +106,7 @@ export function listSessions(projectSlug: string): Session[] {
       startedAt,
       firstUserMessage,
       cwd,
+      hintPath,
     });
   }
 
@@ -150,20 +161,24 @@ export function groupSessions(
   };
 
   for (const session of sessions) {
-    if (!session.cwd) {
+    const pathsToTry = [session.cwd, session.hintPath].filter(Boolean) as string[];
+
+    if (pathsToTry.length === 0) {
       map.get("other")!.push(session);
       continue;
     }
 
-    const cwd = normalize(session.cwd);
     let matched = false;
 
-    for (const name of projectNames) {
-      const root = normalize(path.join(workspaceRoot, name));
-      if (cwd === root || cwd.startsWith(root + path.sep)) {
-        map.get(name)!.push(session);
-        matched = true;
-        break;
+    outer: for (const candidate of pathsToTry) {
+      const normalized = normalize(candidate);
+      for (const name of projectNames) {
+        const root = normalize(path.join(workspaceRoot, name));
+        if (normalized === root || normalized.startsWith(root + path.sep)) {
+          map.get(name)!.push(session);
+          matched = true;
+          break outer;
+        }
       }
     }
 

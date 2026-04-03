@@ -43,6 +43,29 @@ describe('parseSessionLines', () => {
     const lines = ['not json', JSON.stringify({ timestamp: '2026-01-01T00:00:00.000Z' })];
     expect(parseSessionLines(lines).startedAt).toBe('2026-01-01T00:00:00.000Z');
   });
+
+  it('extracts hintPath from ide_opened_file tag in message content', () => {
+    const text = '<ide_opened_file>The user opened the file C:\\Users\\test\\workspace\\toolbox\\src\\foo.ts in the IDE.</ide_opened_file>';
+    const lines = [
+      JSON.stringify({
+        type: 'user',
+        message: { role: 'user', content: [{ type: 'text', text }] },
+        timestamp: '2026-01-01T00:00:00.000Z',
+      }),
+    ];
+    expect(parseSessionLines(lines).hintPath).toBe('C:\\Users\\test\\workspace\\toolbox\\src\\foo.ts');
+  });
+
+  it('returns undefined hintPath when no ide_opened_file tag present', () => {
+    const lines = [
+      JSON.stringify({
+        type: 'user',
+        message: { role: 'user', content: [{ type: 'text', text: 'hello world' }] },
+        timestamp: '2026-01-01T00:00:00.000Z',
+      }),
+    ];
+    expect(parseSessionLines(lines).hintPath).toBeUndefined();
+  });
 });
 
 describe('slugToPath', () => {
@@ -66,7 +89,7 @@ const ROOT = process.platform === 'win32'
   ? 'C:\\Users\\test\\workspace'
   : '/home/user/workspace';
 
-const makeSession = (cwd: string | undefined): Session => ({
+const makeSession = (cwd: string | undefined, hintPath?: string): Session => ({
   id: '123',
   projectSlug: 'test',
   projectPath: 'test',
@@ -74,6 +97,7 @@ const makeSession = (cwd: string | undefined): Session => ({
   startedAt: '',
   firstUserMessage: '',
   cwd,
+  hintPath,
 });
 
 describe('groupSessions', () => {
@@ -111,6 +135,20 @@ describe('groupSessions', () => {
     expect(map.has('toolbox')).toBe(true);
     expect(map.has('gymbro')).toBe(true);
     expect(map.has('other')).toBe(true);
+  });
+
+  it('uses hintPath as fallback when cwd equals workspace root', () => {
+    const hint = path.join(ROOT, 'toolbox', 'src', 'foo.ts');
+    const map = groupSessions([makeSession(ROOT, hint)], ROOT, ['toolbox']);
+    expect(map.get('toolbox')!.length).toBe(1);
+    expect(map.get('other')!.length).toBe(0);
+  });
+
+  it('falls to other when neither cwd nor hintPath matches', () => {
+    const unmatched = process.platform === 'win32' ? 'C:\\other\\path' : '/other/path';
+    const map = groupSessions([makeSession(ROOT, unmatched)], ROOT, ['toolbox']);
+    expect(map.get('other')!.length).toBe(1);
+    expect(map.get('toolbox')!.length).toBe(0);
   });
 });
 

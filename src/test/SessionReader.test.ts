@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { parseSessionLines, slugToPath, groupSessions, readActiveProject, Session } from '../SessionReader';
+import { parseSessionLines, slugToPath, groupSessions, readActiveProject, Session, loadStatusMap } from '../SessionReader';
 import * as path from 'path';
 import * as os from 'os';
-import { mkdtempSync, writeFileSync, unlinkSync, rmdirSync } from 'fs';
+import { mkdtempSync, writeFileSync, unlinkSync, rmdirSync, mkdirSync, rmSync } from 'fs';
 
 describe('parseSessionLines', () => {
   it('extracts startedAt from first timestamp', () => {
@@ -185,19 +185,15 @@ describe('readActiveProject', () => {
   });
 });
 
-import { mkdirSync, rmSync } from 'fs';
-import { join } from 'path';
-import { loadStatusMap } from '../SessionReader';
-
 describe('loadStatusMap', () => {
   let tmpDir: string;
   let statusDir: string;
   let sessionsDir: string;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(os.tmpdir(), 'claude-test-'));
-    statusDir = join(tmpDir, 'sessions-status');
-    sessionsDir = join(tmpDir, 'sessions');
+    tmpDir = mkdtempSync(path.join(os.tmpdir(), 'claude-test-'));
+    statusDir = path.join(tmpDir, 'sessions-status');
+    sessionsDir = path.join(tmpDir, 'sessions');
     mkdirSync(statusDir, { recursive: true });
     mkdirSync(sessionsDir, { recursive: true });
   });
@@ -207,7 +203,7 @@ describe('loadStatusMap', () => {
   });
 
   it('returns empty map when statusDir does not exist', () => {
-    const missing = join(tmpDir, 'nonexistent');
+    const missing = path.join(tmpDir, 'nonexistent');
     const result = loadStatusMap(missing, sessionsDir);
     expect(result.size).toBe(0);
   });
@@ -216,13 +212,13 @@ describe('loadStatusMap', () => {
     const pid = 12345;
     const sessionId = 'abc-123';
     // Write sessions/<pid>.json so pidMap resolves sessionId
-    writeFileSync(join(sessionsDir, `${pid}.json`), JSON.stringify({ pid, sessionId }));
+    writeFileSync(path.join(sessionsDir, `${pid}.json`), JSON.stringify({ pid, sessionId }));
     // Write sessions-status/<pid>.json with todos
     const snap = {
       todos: [{ content: 'Write test', status: 'pending', activeForm: 'Writing test' }],
       pendingInput: false,
     };
-    writeFileSync(join(statusDir, `${pid}.json`), JSON.stringify(snap));
+    writeFileSync(path.join(statusDir, `${pid}.json`), JSON.stringify(snap));
 
     const result = loadStatusMap(statusDir, sessionsDir);
     expect(result.size).toBe(1);
@@ -233,8 +229,8 @@ describe('loadStatusMap', () => {
   it('skips malformed JSON files without throwing', () => {
     const pid = 99999;
     const sessionId = 'xyz-999';
-    writeFileSync(join(sessionsDir, `${pid}.json`), JSON.stringify({ pid, sessionId }));
-    writeFileSync(join(statusDir, `${pid}.json`), 'not-json{{{');
+    writeFileSync(path.join(sessionsDir, `${pid}.json`), JSON.stringify({ pid, sessionId }));
+    writeFileSync(path.join(statusDir, `${pid}.json`), 'not-json{{{');
 
     expect(() => loadStatusMap(statusDir, sessionsDir)).not.toThrow();
     const result = loadStatusMap(statusDir, sessionsDir);
@@ -243,7 +239,7 @@ describe('loadStatusMap', () => {
 
   it('skips status files with no matching session', () => {
     // No entry in sessionsDir for this pid
-    writeFileSync(join(statusDir, '77777.json'), JSON.stringify({ pendingInput: true }));
+    writeFileSync(path.join(statusDir, '77777.json'), JSON.stringify({ pendingInput: true }));
     const result = loadStatusMap(statusDir, sessionsDir);
     expect(result.size).toBe(0);
   });

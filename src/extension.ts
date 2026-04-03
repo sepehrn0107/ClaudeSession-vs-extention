@@ -107,12 +107,15 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push({ dispose: () => watcher.close() });
   }
 
-  // Watch ~/.claude/sessions-status for live pendingInput changes
+  // Watch ~/.claude/sessions-status for live status changes.
+  // Fall back to watching the parent dir so we catch the first write if the
+  // sessions-status directory doesn't exist yet when the extension activates.
   const statusDir = path.join(os.homedir(), ".claude", "sessions-status");
-  if (fs.existsSync(statusDir)) {
-    const statusWatcher = fs.watch(statusDir, debouncedRefresh);
-    context.subscriptions.push({ dispose: () => statusWatcher.close() });
-  }
+  const statusWatchTarget = fs.existsSync(statusDir)
+    ? statusDir
+    : path.join(os.homedir(), ".claude");
+  const statusWatcher = fs.watch(statusWatchTarget, debouncedRefresh);
+  context.subscriptions.push({ dispose: () => statusWatcher.close() });
 
   // Poll every 5 s as fallback (fs.watch misses rapid consecutive writes on Windows)
   const pollTimer = setInterval(() => {

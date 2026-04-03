@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseSessionLines } from '../SessionReader';
+import { parseSessionLines, slugToPath } from '../SessionReader';
 
 describe('parseSessionLines', () => {
   it('extracts startedAt from first timestamp', () => {
@@ -39,5 +39,22 @@ describe('parseSessionLines', () => {
   it('skips malformed lines without throwing', () => {
     const lines = ['not json', JSON.stringify({ timestamp: '2026-01-01T00:00:00.000Z' })];
     expect(parseSessionLines(lines).startedAt).toBe('2026-01-01T00:00:00.000Z');
+  });
+});
+
+describe('slugToPath', () => {
+  it('decodes Windows slug to Windows path', () => {
+    expect(slugToPath('c--Users-sepeh-Documents-workspace'))
+      .toBe('C:\\Users\\sepeh\\Documents\\workspace');
+  });
+
+  it('decodes nested Windows slug', () => {
+    expect(slugToPath('c--Users-sepeh-Documents-workspace--toolbox'))
+      .toBe('C:\\Users\\sepeh\\Documents\\workspace\\toolbox');
+  });
+
+  it('decodes Linux/Mac slug to Unix path', () => {
+    expect(slugToPath('-home-user-workspace'))
+      .toBe('/home/user/workspace');
   });
 });

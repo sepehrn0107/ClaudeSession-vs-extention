@@ -35,7 +35,13 @@ export function listProjects(): string[] {
 }
 
 export function slugToPath(slug: string): string {
-  return slug.replace(/^[a-z]--/, (m) => m[0].toUpperCase() + ":\\").replace(/--/g, "\\");
+  if (/^[a-z]-/i.test(slug)) {
+    // Windows: 'c--Users-sepeh-Documents-workspace' → 'C:\Users\sepeh\Documents\workspace'
+    // Replace '--' before '-' to avoid double backslash from the initial '--'
+    return slug[0].toUpperCase() + ":" + slug.slice(1).replace(/--/g, "\\").replace(/-/g, "\\");
+  }
+  // Linux/Mac: '-home-user-workspace' → '/home/user/workspace'
+  return slug.replace(/-/g, "/");
 }
 
 export function parseSessionLines(lines: string[]): ParsedSession {

@@ -60,9 +60,9 @@ export function buildTodosHtml(groups: ProjectTodoGroup[]): string {
 </div>`,
         )
         .join("\n");
-      return `<div class="project-group">
-  <div class="project-header">${escHtml(g.project)}</div>
-  ${todosHtml}
+      return `<div class="project-group" data-project="${escHtml(g.project)}">
+  <div class="project-header"><span class="chevron">▾</span>${escHtml(g.project)}</div>
+  <div class="todos">${todosHtml}</div>
 </div>`;
     })
     .join("\n");
@@ -76,11 +76,16 @@ export function buildTodosHtml(groups: ProjectTodoGroup[]): string {
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size);
       color: var(--vscode-foreground); background: var(--vscode-sideBar-background); }
-    .project-header { padding: 4px 8px; font-size: 0.75em; font-weight: 700;
-      text-transform: uppercase; letter-spacing: 0.06em;
+    .project-header { display: flex; align-items: center; gap: 4px;
+      padding: 4px 8px; font-size: 0.75em; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer;
       color: var(--vscode-descriptionForeground);
       border-bottom: 1px solid var(--vscode-panel-border);
-      margin-top: 4px; }
+      margin-top: 4px; user-select: none; }
+    .project-header:hover { color: var(--vscode-foreground); }
+    .chevron { font-size: 0.9em; transition: transform 0.15s; display: inline-block; }
+    .project-group.collapsed .chevron { transform: rotate(-90deg); }
+    .project-group.collapsed .todos { display: none; }
     .todo-row { display: grid; grid-template-columns: 14px 1fr; align-items: center;
       gap: 6px; padding: 5px 8px 5px 10px; cursor: pointer;
       border-bottom: 1px solid var(--vscode-panel-border); }
@@ -95,10 +100,28 @@ export function buildTodosHtml(groups: ProjectTodoGroup[]): string {
 ${groupsHtml}
   <script>
     const vscode = acquireVsCodeApi();
+    const state = vscode.getState() || {};
+    const collapsed = new Set(state.collapsed || []);
+
+    document.querySelectorAll('.project-group').forEach(g => {
+      if (collapsed.has(g.dataset.project)) g.classList.add('collapsed');
+    });
+
+    function saveState() {
+      const now = [];
+      document.querySelectorAll('.project-group.collapsed').forEach(g => now.push(g.dataset.project));
+      vscode.setState({ collapsed: now });
+    }
+
     document.body.addEventListener('click', (e) => {
+      const header = e.target.closest('.project-header');
+      if (header) {
+        header.closest('.project-group').classList.toggle('collapsed');
+        saveState();
+        return;
+      }
       const row = e.target.closest('.todo-row');
-      if (!row) return;
-      vscode.postMessage({ command: 'focusSession', sessionId: row.dataset.sessionId });
+      if (row) vscode.postMessage({ command: 'focusSession', sessionId: row.dataset.sessionId });
     });
   </script>
 </body>

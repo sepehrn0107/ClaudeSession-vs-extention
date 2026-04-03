@@ -33,6 +33,25 @@ export interface ContextUsage {
   model: string;
 }
 
+export interface SessionStats {
+  memoryUsed: number;
+  memoryLimit: number;
+  checkpointPct: number;
+  exchangeCount: number;
+  durationMinutes: number;
+  toolCounts: Record<string, number>;
+}
+
+export interface ToolCallItem {
+  kind: "tool_call";
+  toolName: string;
+  inputPreview: string;
+  inputFull: string;
+  timestamp: string;
+}
+
+export type ConversationItem = ChatMessage | ToolCallItem;
+
 const CLAUDE_DIR = path.join(os.homedir(), ".claude", "projects");
 
 export function listProjects(): string[] {
@@ -275,4 +294,127 @@ function extractLastText(content: unknown): string {
     return textBlocks[textBlocks.length - 1] ?? "";
   }
   return "";
+}
+
+const _statsCache = new Map<string, { mtime: number; stats: SessionStats }>();
+
+export function computeSessionStats(filePath: string): SessionStats {
+  const mtime = fs.statSync(filePath).mtimeMs;
+  const cached = _statsCache.get(filePath);
+  if (cached && cached.mtime === mtime) return cached.stats;
+
+  const content = fs.readFileSync(filePath, "utf8");
+  const lines = content.split("\n");
+
+  let exchangeCount = 0;
+  let firstTs = "";
+  let lastTs = "";
+  let lastMemoryUsed = 0;
+  let totalCacheRead = 0;
+  let totalInput = 0;
+  const toolCounts: Record<string, number> = {};
+
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    try {
+      const obj = JSON.parse(line);
+      if (obj.timestamp) {
+        if (!firstTs) firstTs = obj.timestamp;
+        lastTs = obj.timestamp;
+      }
+      if (obj.type === "user") {
+        exchangeCount++;
+      }
+      if (obj.type === "assistant" && obj.message?.usage) {
+        const u = obj.message.usage;
+        const input = u.input_tokens ?? 0;
+        const cacheRead = u.cache_read_input_tokens ?? 0;
+        const cacheCreate = u.cache_creation_input_tokens ?? 0;
+        lastMemoryUsed = input + cacheRead + cacheCreate;
+        totalCacheRead += cacheRead;
+        totalInput += input + cacheRead + cacheCreate;
+      }
+      if (obj.type === "assistant" && Array.isArray(obj.message?.content)) {
+        for (const block of obj.message.content) {
+          if (block?.type === "tool_use" && typeof block.name === "string") {
+            toolCounts[block.name] = (toolCounts[block.name] ?? 0) + 1;
+          }
+        }
+      }
+    } catch {
+      // skip malformed
+    }
+  }
+
+  const checkpointPct =
+    totalInput > 0 ? Math.round((totalCacheRead / totalInput) * 100) : 0;
+  const durationMs =
+    firstTs && lastTs
+      ? new Date(lastTs).getTime() - new Date(firstTs).getTime()
+      : 0;
+
+  const stats: SessionStats = {
+    memoryUsed: lastMemoryUsed,
+    memoryLimit: 200_000,
+    checkpointPct,
+    exchangeCount,
+    durationMinutes: Math.round(durationMs / 60_000),
+    toolCounts,
+  };
+
+  _statsCache.set(filePath, { mtime, stats });
+  return stats;
+}
+
+function extractToolPreview(input: unknown): string {
+  if (!input || typeof input !== "object") return "";
+  const obj = input as Record<string, unknown>;
+  const preview =
+    obj.command ?? obj.file_path ?? obj.path ?? obj.description ?? obj.query;
+  if (typeof preview === "string") return preview.split("\n")[0].slice(0, 80);
+  return JSON.stringify(input).slice(0, 80);
+}
+
+export function readSessionItems(filePath: string): ConversationItem[] {
+  const items: ConversationItem[] = [];
+  const content = fs.readFileSync(filePath, "utf8");
+
+  for (const line of content.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const obj = JSON.parse(line);
+      if (obj.type === "user" && obj.message?.content) {
+        const text = extractText(obj.message.content);
+        if (text) {
+          items.push({ role: "user", text, timestamp: obj.timestamp ?? "" });
+        }
+      } else if (obj.type === "assistant" && obj.message?.content) {
+        const text = extractText(obj.message.content);
+        if (text) {
+          items.push({
+            role: "assistant",
+            text,
+            timestamp: obj.timestamp ?? "",
+          });
+        }
+        if (Array.isArray(obj.message.content)) {
+          for (const block of obj.message.content) {
+            if (block?.type === "tool_use" && typeof block.name === "string") {
+              items.push({
+                kind: "tool_call",
+                toolName: block.name,
+                inputPreview: extractToolPreview(block.input),
+                inputFull: JSON.stringify(block.input ?? {}),
+                timestamp: obj.timestamp ?? "",
+              });
+            }
+          }
+        }
+      }
+    } catch {
+      // skip malformed
+    }
+  }
+
+  return items;
 }

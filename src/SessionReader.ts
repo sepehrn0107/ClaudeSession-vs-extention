@@ -15,6 +15,13 @@ export interface Session {
   filePath: string;
   startedAt: string;
   firstUserMessage: string;
+  cwd?: string;
+}
+
+export interface ParsedSession {
+  startedAt: string;
+  firstUserMessage: string;
+  cwd?: string;
 }
 
 const CLAUDE_DIR = path.join(os.homedir(), ".claude", "projects");
@@ -31,6 +38,35 @@ export function slugToPath(slug: string): string {
   return slug.replace(/^[a-z]--/, (m) => m[0].toUpperCase() + ":\\").replace(/--/g, "\\");
 }
 
+export function parseSessionLines(lines: string[]): ParsedSession {
+  let startedAt = "";
+  let firstUserMessage = "(empty)";
+  let cwd: string | undefined;
+
+  for (const line of lines) {
+    try {
+      const obj = JSON.parse(line);
+      if (!startedAt && obj.timestamp) {
+        startedAt = obj.timestamp;
+      }
+      if (!cwd && obj.cwd) {
+        cwd = obj.cwd;
+      }
+      if (
+        obj.type === "user" &&
+        obj.message?.content?.[0]?.text &&
+        firstUserMessage === "(empty)"
+      ) {
+        firstUserMessage = obj.message.content[0].text.slice(0, 80).trim();
+      }
+    } catch {
+      // skip malformed lines
+    }
+  }
+
+  return { startedAt, firstUserMessage, cwd };
+}
+
 export function listSessions(projectSlug: string): Session[] {
   const dir = path.join(CLAUDE_DIR, projectSlug);
   if (!fs.existsSync(dir)) return [];
@@ -44,28 +80,7 @@ export function listSessions(projectSlug: string): Session[] {
   for (const file of files) {
     const filePath = path.join(dir, file);
     const id = file.replace(".jsonl", "");
-    const lines = readLines(filePath, 20);
-
-    let startedAt = "";
-    let firstUserMessage = "(empty)";
-
-    for (const line of lines) {
-      try {
-        const obj = JSON.parse(line);
-        if (!startedAt && obj.timestamp) {
-          startedAt = obj.timestamp;
-        }
-        if (
-          obj.type === "user" &&
-          obj.message?.content?.[0]?.text &&
-          firstUserMessage === "(empty)"
-        ) {
-          firstUserMessage = obj.message.content[0].text.slice(0, 80).trim();
-        }
-      } catch {
-        // skip malformed lines
-      }
-    }
+    const { startedAt, firstUserMessage, cwd } = parseSessionLines(readLines(filePath, 20));
 
     sessions.push({
       id,
@@ -74,6 +89,7 @@ export function listSessions(projectSlug: string): Session[] {
       filePath,
       startedAt,
       firstUserMessage,
+      cwd,
     });
   }
 
@@ -96,11 +112,7 @@ export function readSession(filePath: string): ChatMessage[] {
       } else if (obj.type === "assistant" && obj.message?.content) {
         const text = extractText(obj.message.content);
         if (text) {
-          messages.push({
-            role: "assistant",
-            text,
-            timestamp: obj.timestamp ?? "",
-          });
+          messages.push({ role: "assistant", text, timestamp: obj.timestamp ?? "" });
         }
       }
     } catch {

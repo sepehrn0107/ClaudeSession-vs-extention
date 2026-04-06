@@ -33,6 +33,11 @@
           "id": "claudeTodosList",
           "name": "Todos",
           "type": "webview"
+        },
+        {
+          "id": "claudeSkillsList",
+          "name": "Skills",
+          "type": "webview"
         }
       ]
     },
@@ -72,6 +77,11 @@
           "type": "string",
           "default": "",
           "description": "Optional. Path to a file containing 'active: <name>' \u00e2\u20ac\u201d that project group will be expanded by default."
+        },
+        "claudeSessions.toolboxSkillsPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the toolbox skills directory (e.g. C:\\Users\\you\\workspace\\toolbox\\skills)."
         }
       }
     }

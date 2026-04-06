@@ -7,6 +7,7 @@ import { SessionListView } from "./SessionListView";
 import { SessionPanel } from "./SessionPanel";
 import { Session, loadSessionPidMap } from "./SessionReader";
 import { TodosView } from "./TodosView";
+import { SkillLauncherView } from "./SkillLauncherView";
 
 function debounce(fn: () => void, ms: number): () => void {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -64,6 +65,14 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerWebviewViewProvider(TodosView.viewType, todosProvider),
   );
 
+  const skillsProvider = new SkillLauncherView();
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      SkillLauncherView.viewType,
+      skillsProvider,
+    ),
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand("claudeSessions.refresh", () => {
       provider.refresh();
@@ -100,6 +109,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const debouncedRefresh = debounce(() => {
     provider.refresh();
     todosProvider.refresh();
+    skillsProvider.refresh();
   }, 300);
 
   const watchDir = path.join(os.homedir(), ".claude", "projects");
@@ -118,10 +128,19 @@ export function activate(context: vscode.ExtensionContext): void {
   const statusWatcher = fs.watch(statusWatchTarget, debouncedRefresh);
   context.subscriptions.push({ dispose: () => statusWatcher.close() });
 
+  // Watch toolbox skills directory and refresh panel when files change.
+  const skillsConfig = vscode.workspace.getConfiguration("claudeSessions");
+  const skillsDir = skillsConfig.get<string>("toolboxSkillsPath", "").trim();
+  if (skillsDir && fs.existsSync(skillsDir)) {
+    const skillsWatcher = fs.watch(skillsDir, debouncedRefresh);
+    context.subscriptions.push({ dispose: () => skillsWatcher.close() });
+  }
+
   // Poll every 5 s as fallback (fs.watch misses rapid consecutive writes on Windows)
   const pollTimer = setInterval(() => {
     provider.refresh();
     todosProvider.refresh();
+    skillsProvider.refresh();
   }, 5000);
   context.subscriptions.push({ dispose: () => clearInterval(pollTimer) });
 }
